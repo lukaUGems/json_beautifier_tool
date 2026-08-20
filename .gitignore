@@ -1,0 +1,6 @@
+# Build artifacts
+build/
+icon.iconset/
+
+# macOS
+.DS_Store

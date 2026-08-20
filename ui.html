@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSON Viewer</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-soft: #f6f7f9;
+    --border: #e3e6ea;
+    --text: #1d2125;
+    --muted: #8a929b;
+    --key: #5b3fd4;
+    --string: #1a7f37;
+    --number: #b5470b;
+    --bool: #0a6cbb;
+    --null: #8a929b;
+    --accent: #5b3fd4;
+    --accent-soft: #ece8fb;
+    --error-bg: #fde8e8;
+    --error-text: #b42318;
+    --toggle: #b4bac1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1f24;
+      --bg-soft: #23272e;
+      --border: #333941;
+      --text: #e6e9ed;
+      --muted: #8a929b;
+      --key: #b39dff;
+      --string: #7ee787;
+      --number: #ffa657;
+      --bool: #79c0ff;
+      --null: #8a929b;
+      --accent: #b39dff;
+      --accent-soft: #2d2a40;
+      --error-bg: #3a1f1f;
+      --error-text: #ff8e8e;
+      --toggle: #5a626b;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-soft);
+    flex: 0 0 auto;
+    -webkit-user-select: none;
+  }
+  .toolbar .title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-right: auto;
+    letter-spacing: .2px;
+  }
+  .toolbar .status {
+    font-size: 12px;
+    color: var(--muted);
+    margin-right: 6px;
+  }
+  button {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 5px 11px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background .12s, border-color .12s;
+  }
+  button:hover { background: var(--accent-soft); border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:hover { opacity: .9; }
+  .main { flex: 1 1 auto; display: flex; min-height: 0; }
+  .input-pane, .output-pane {
+    flex: 1 1 50%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .input-pane { border-right: 1px solid var(--border); position: relative; }
+  .input-pane.drag-over { box-shadow: inset 0 0 0 2px var(--accent); }
+  .input-pane.drag-over::after {
+    content: "Drop JSON file to load";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-family: -apple-system, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    pointer-events: none;
+  }
+  .pane-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--muted);
+    padding: 8px 14px 4px;
+    flex: 0 0 auto;
+  }
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 14px 8px;
+    flex: 0 0 auto;
+  }
+  .search-bar input[type="search"] {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: inherit;
+    font-size: 12.5px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg);
+    color: var(--text);
+    outline: none;
+  }
+  .search-bar input[type="search"]:focus { border-color: var(--accent); }
+  .search-count {
+    font-size: 11.5px;
+    color: var(--muted);
+    min-width: 62px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .search-bar button {
+    padding: 4px 9px;
+    line-height: 1;
+  }
+  .search-bar button:disabled { opacity: .4; cursor: default; background: var(--bg); border-color: var(--border); }
+  .filter-toggle {
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  mark.hl {
+    background: #ffe27a;
+    color: #1d2125;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  mark.hl.current {
+    background: #ff9d2e;
+    color: #1d2125;
+    box-shadow: 0 0 0 1px #d97706;
+  }
+  .search-hidden { display: none !important; }
+  textarea {
+    flex: 1 1 auto;
+    border: none;
+    resize: none;
+    outline: none;
+    padding: 8px 14px 14px;
+    font-family: "SF Mono", ui-monospace, Menlo, Monaco, monospace;
+    font-size: 12.5px;
+    line-height: 1.5;
+    background: var(--bg);
+    color: var(--text);
+    tab-size: 2;
+  }
+  textarea::placeholder { color: var(--muted); }
+  .output {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 8px 14px 40px;
+    font-family: "SF Mono", ui-monospace, Menlo, Monaco, monospace;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .error {
+    margin: 10px 14px;
+    padding: 10px 12px;
+    background: var(--error-bg);
+    color: var(--error-text);
+    border-radius: 8px;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+  }
+  .empty {
+    color: var(--muted);
+    padding: 20px 14px;
+    font-family: -apple-system, sans-serif;
+    font-size: 13px;
+  }
+  /* tree */
+  .node { white-space: nowrap; }
+  .row { display: block; }
+  .indent { display: inline-block; }
+  .toggle {
+    display: inline-block;
+    width: 14px;
+    color: var(--toggle);
+    cursor: pointer;
+    text-align: center;
+    user-select: none;
+    transition: transform .1s;
+  }
+  .toggle.collapsed { transform: rotate(-90deg); }
+  .toggle.leaf { cursor: default; visibility: hidden; }
+  .key { color: var(--key); }
+  .colon { color: var(--muted); }
+  .str { color: var(--string); }
+  .num { color: var(--number); }
+  .bool { color: var(--bool); }
+  .null { color: var(--null); }
+  .brace { color: var(--text); }
+  .count { color: var(--muted); font-style: italic; }
+  .children { display: block; }
+  .children.hidden { display: none; }
+  .preview { color: var(--muted); font-style: italic; }
+  a.link { color: var(--bool); text-decoration: underline; }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <span class="title">JSON Viewer</span>
+    <span class="status" id="status"></span>
+    <input type="file" id="fileInput" accept=".json,application/json,text/plain" style="display:none">
+    <button id="open">Open file…</button>
+    <button id="sample">Sample</button>
+    <button id="expand">Expand all</button>
+    <button id="collapse">Collapse all</button>
+    <button id="copy">Copy formatted</button>
+    <button id="clear">Clear</button>
+    <button class="primary" id="format">Format ⌘↵</button>
+  </div>
+  <div class="main">
+    <div class="input-pane">
+      <div class="pane-label">Paste JSON</div>
+      <textarea id="input" placeholder='Paste your JSON here, then press Format (or ⌘↵).&#10;&#10;{ "hello": "world" }' spellcheck="false"></textarea>
+    </div>
+    <div class="output-pane">
+      <div class="pane-label">Formatted</div>
+      <div class="search-bar">
+        <input id="search" type="search" placeholder="Search keys & values… (⌘F)" spellcheck="false" autocomplete="off">
+        <span class="search-count" id="searchCount"></span>
+        <button id="prevMatch" title="Previous match (⇧⏎)">↑</button>
+        <button id="nextMatch" title="Next match (⏎)">↓</button>
+        <label class="filter-toggle" title="Show only matching branches"><input type="checkbox" id="filterMode"> Filter</label>
+      </div>
+      <div class="output" id="output"><div class="empty">Formatted JSON appears here.</div></div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const input = $('input'), output = $('output'), status = $('status');
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function linkify(s){
+  const esc = escapeHtml(s);
+  if (/^https?:\/\/[^\s]+$/.test(s)) return '<a class="link" href="'+esc+'" target="_blank">'+esc+'</a>';
+  return esc;
+}
+
+function valuePreview(v){
+  if (Array.isArray(v)) return '[…] '+v.length+' item'+(v.length===1?'':'s');
+  if (v && typeof v === 'object') { const k=Object.keys(v).length; return '{…} '+k+' key'+(k===1?'':'s'); }
+  return '';
+}
+
+let uid = 0;
+function renderNode(value, keyHtml, depth){
+  const isArr = Array.isArray(value);
+  const isObj = value && typeof value === 'object';
+  const indent = '<span class="indent" style="width:'+(depth*16)+'px"></span>';
+
+  if (!isObj) {
+    let valHtml;
+    if (value === null) valHtml = '<span class="null">null</span>';
+    else if (typeof value === 'string') valHtml = '<span class="str">"'+linkify(value)+'"</span>';
+    else if (typeof value === 'number') valHtml = '<span class="num">'+escapeHtml(value)+'</span>';
+    else if (typeof value === 'boolean') valHtml = '<span class="bool">'+value+'</span>';
+    else valHtml = '<span>'+escapeHtml(String(value))+'</span>';
+    return '<div class="row">'+indent+'<span class="toggle leaf">▾</span>'+(keyHtml||'')+valHtml+'</div>';
+  }
+
+  const id = 'n'+(uid++);
+  const keys = isArr ? value.map((_,i)=>i) : Object.keys(value);
+  const open = isArr ? '[' : '{';
+  const close = isArr ? ']' : '}';
+  const count = '<span class="count"> '+keys.length+(isArr?' item':' key')+(keys.length===1?'':'s')+'</span>';
+
+  let html = '<div class="node">';
+  html += '<div class="row">'+indent+'<span class="toggle" data-target="'+id+'">▾</span>'+(keyHtml||'')+
+          '<span class="brace">'+open+'</span>'+count+'</div>';
+  html += '<div class="children" id="'+id+'">';
+  keys.forEach(k => {
+    const childKey = isArr ? '' : '<span class="key">"'+escapeHtml(k)+'"</span><span class="colon">: </span>';
+    html += renderNode(value[k], childKey, depth+1);
+  });
+  html += '</div>';
+  html += '<div class="row">'+'<span class="indent" style="width:'+(depth*16)+'px"></span><span class="toggle leaf">▾</span><span class="brace">'+close+'</span></div>';
+  html += '</div>';
+  return html;
+}
+
+function showError(msg){
+  output.innerHTML = '<div class="error">'+escapeHtml(msg)+'</div>';
+  status.textContent = 'Invalid JSON';
+}
+
+function format(){
+  const raw = input.value.trim();
+  if (!raw){
+    output.innerHTML = '<div class="empty">Paste some JSON on the left, then press Format.</div>';
+    status.textContent = '';
+    return;
+  }
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch(e){
+    // try to surface position
+    let msg = e.message;
+    const m = msg.match(/position (\d+)/);
+    if (m){
+      const pos = +m[1];
+      const before = raw.slice(0, pos);
+      const line = before.split('\n').length;
+      const col = pos - before.lastIndexOf('\n');
+      msg += '\n→ around line '+line+', column '+col;
+    }
+    showError('Could not parse JSON:\n'+msg);
+    return;
+  }
+  uid = 0;
+  output.innerHTML = renderNode(parsed, '', 0);
+  const bytes = new Blob([raw]).size;
+  status.textContent = 'Valid · '+formatBytes(bytes);
+  window._lastFormatted = JSON.stringify(parsed, null, 2);
+  if (search && search.value.trim()) runSearch();
+}
+
+function formatBytes(b){
+  if (b < 1024) return b+' B';
+  if (b < 1048576) return (b/1024).toFixed(1)+' KB';
+  return (b/1048576).toFixed(2)+' MB';
+}
+
+output.addEventListener('click', e => {
+  const t = e.target.closest('.toggle');
+  if (!t || t.classList.contains('leaf')) return;
+  const target = document.getElementById(t.dataset.target);
+  if (!target) return;
+  target.classList.toggle('hidden');
+  t.classList.toggle('collapsed');
+});
+
+function setAll(hidden){
+  document.querySelectorAll('.children').forEach(c => c.classList.toggle('hidden', hidden));
+  document.querySelectorAll('.toggle:not(.leaf)').forEach(t => t.classList.toggle('collapsed', hidden));
+}
+
+$('format').onclick = format;
+$('expand').onclick = () => setAll(false);
+$('collapse').onclick = () => setAll(true);
+$('clear').onclick = () => { input.value=''; format(); input.focus(); };
+$('copy').onclick = async () => {
+  if (!window._lastFormatted){ format(); }
+  if (!window._lastFormatted) return;
+  try { await navigator.clipboard.writeText(window._lastFormatted); status.textContent = 'Copied formatted JSON'; }
+  catch(_){ status.textContent = 'Copy failed'; }
+};
+// ---------- Open file ----------
+const fileInput = $('fileInput');
+function loadFile(file){
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    input.value = e.target.result;
+    format();
+    input.focus();
+    status.textContent = status.textContent + ' · ' + file.name;
+  };
+  reader.onerror = () => { status.textContent = 'Could not read file'; };
+  reader.readAsText(file);
+}
+$('open').onclick = () => fileInput.click();
+fileInput.addEventListener('change', e => {
+  loadFile(e.target.files[0]);
+  fileInput.value = ''; // allow re-opening the same file
+});
+
+// Drag & drop a .json file onto the input pane
+const inputPane = document.querySelector('.input-pane');
+['dragenter','dragover'].forEach(ev => inputPane.addEventListener(ev, e => {
+  e.preventDefault(); inputPane.classList.add('drag-over');
+}));
+['dragleave','drop'].forEach(ev => inputPane.addEventListener(ev, e => {
+  e.preventDefault(); inputPane.classList.remove('drag-over');
+}));
+inputPane.addEventListener('drop', e => {
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (file) loadFile(file);
+});
+
+$('sample').onclick = () => {
+  input.value = JSON.stringify({
+    app: "JSON Viewer",
+    version: 1.0,
+    native: true,
+    features: ["paste", "format", "collapse", "syntax highlight"],
+    author: { name: "Luka", team: "UserGems" },
+    links: { homepage: "https://www.usergems.com" },
+    counts: { keys: 7, nested: { deep: { value: null, ok: true } } },
+    items: [ {id:1, active:true}, {id:2, active:false} ]
+  }, null, 2);
+  format();
+};
+
+input.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter'){ e.preventDefault(); format(); }
+});
+// auto-format on paste
+input.addEventListener('paste', () => setTimeout(format, 0));
+
+// ---------- Search ----------
+const search = $('search'), searchCount = $('searchCount'), filterMode = $('filterMode');
+const prevBtn = $('prevMatch'), nextBtn = $('nextMatch');
+let matches = [], curMatch = -1;
+
+function clearSearch(){
+  output.querySelectorAll('mark.hl').forEach(m => {
+    const p = m.parentNode;
+    p.replaceChild(document.createTextNode(m.textContent), m);
+    p.normalize();
+  });
+  output.querySelectorAll('.search-hidden').forEach(el => el.classList.remove('search-hidden'));
+  matches = []; curMatch = -1;
+}
+
+function highlightTextNodes(root, q){
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  const nodes = [];
+  let n; while (n = walker.nextNode()) nodes.push(n);
+  nodes.forEach(node => {
+    const text = node.nodeValue, lower = text.toLowerCase();
+    let idx = lower.indexOf(q);
+    if (idx === -1) return;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    while (idx !== -1){
+      if (idx > last) frag.appendChild(document.createTextNode(text.slice(last, idx)));
+      const mk = document.createElement('mark');
+      mk.className = 'hl';
+      mk.textContent = text.slice(idx, idx + q.length);
+      frag.appendChild(mk);
+      last = idx + q.length;
+      idx = lower.indexOf(q, last);
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    node.parentNode.replaceChild(frag, node);
+  });
+}
+
+function revealAncestors(el){
+  let node = el.parentElement;
+  while (node && node !== output){
+    if (node.classList.contains('children') && node.classList.contains('hidden')){
+      node.classList.remove('hidden');
+      const tog = output.querySelector('.toggle[data-target="'+node.id+'"]');
+      if (tog) tog.classList.remove('collapsed');
+    }
+    node = node.parentElement;
+  }
+}
+
+function applyFilter(){
+  output.querySelectorAll('.row').forEach(r => r.classList.add('search-hidden'));
+  matches.forEach(m => {
+    const row = m.closest('.row');
+    if (row) row.classList.remove('search-hidden');
+    let node = m.closest('.node');
+    while (node && node !== output){
+      Array.from(node.children).forEach(c => {
+        if (c.classList.contains('row')) c.classList.remove('search-hidden');
+      });
+      node = node.parentElement ? node.parentElement.closest('.node') : null;
+    }
+  });
+}
+
+function runSearch(){
+  clearSearch();
+  const q = search.value.trim().toLowerCase();
+  if (!q){ updateCount(); updateNav(); return; }
+  output.querySelectorAll('.key, .str, .num, .bool, .null').forEach(span => highlightTextNodes(span, q));
+  matches = Array.from(output.querySelectorAll('mark.hl'));
+  matches.forEach(revealAncestors);
+  if (filterMode.checked) applyFilter();
+  if (matches.length){ curMatch = 0; setCurrent(); }
+  updateCount(); updateNav();
+}
+
+function setCurrent(){
+  matches.forEach(m => m.classList.remove('current'));
+  const m = matches[curMatch];
+  if (m){ m.classList.add('current'); m.scrollIntoView({block:'center', behavior:'smooth'}); }
+  updateCount();
+}
+
+function nextMatch(){ if (matches.length){ curMatch = (curMatch+1)%matches.length; setCurrent(); } }
+function prevMatch(){ if (matches.length){ curMatch = (curMatch-1+matches.length)%matches.length; setCurrent(); } }
+
+function updateCount(){
+  const q = search.value.trim();
+  if (!q){ searchCount.textContent = ''; return; }
+  searchCount.textContent = matches.length ? (curMatch+1)+' / '+matches.length : 'No matches';
+}
+function updateNav(){
+  const none = matches.length === 0;
+  prevBtn.disabled = none; nextBtn.disabled = none;
+}
+
+let searchTimer;
+search.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 110); });
+search.addEventListener('keydown', e => {
+  if (e.key === 'Enter'){ e.preventDefault(); e.shiftKey ? prevMatch() : nextMatch(); }
+  else if (e.key === 'Escape'){ search.value=''; clearSearch(); updateCount(); updateNav(); }
+});
+prevBtn.onclick = prevMatch;
+nextBtn.onclick = nextMatch;
+filterMode.addEventListener('change', runSearch);
+updateNav();
+
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')){
+    e.preventDefault(); search.focus(); search.select();
+  }
+});
+
+input.focus();
+</script>
+</body>
+</html>
