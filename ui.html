@@ -249,6 +249,7 @@
     <button id="expand">Expand all</button>
     <button id="collapse">Collapse all</button>
     <button id="copy">Copy formatted</button>
+    <button id="save">Save…</button>
     <button id="clear">Clear</button>
     <button class="primary" id="format">Format ⌘↵</button>
   </div>
@@ -398,6 +399,7 @@ function loadFile(file){
   const reader = new FileReader();
   reader.onload = e => {
     input.value = e.target.result;
+    window._lastFileName = file.name;
     format();
     input.focus();
     status.textContent = status.textContent + ' · ' + file.name;
@@ -423,6 +425,36 @@ inputPane.addEventListener('drop', e => {
   const file = e.dataTransfer.files && e.dataTransfer.files[0];
   if (file) loadFile(file);
 });
+
+// ---------- Save ----------
+$('save').onclick = () => {
+  const raw = input.value.trim();
+  if (!raw){ status.textContent = 'Nothing to save'; return; }
+  // Save the beautified version when the JSON is valid; otherwise save as-is.
+  let content = raw;
+  try { content = JSON.stringify(JSON.parse(raw), null, 2); } catch(_){ /* keep raw */ }
+  const name = window._lastFileName || 'formatted.json';
+
+  const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.saveFile;
+  if (bridge){
+    // Native macOS save panel (in the app)
+    bridge.postMessage({ name: name, content: content });
+    status.textContent = 'Choose where to save…';
+  } else {
+    // Fallback for plain browsers
+    const blob = new Blob([content], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    status.textContent = 'Saved ' + name;
+  }
+};
+// Called back from Swift after the native save panel closes.
+window.onNativeSaved = (ok, name) => {
+  status.textContent = ok ? ('Saved ' + name) : (name ? ('Save failed: ' + name) : 'Save canceled');
+};
 
 $('sample').onclick = () => {
   input.value = JSON.stringify({

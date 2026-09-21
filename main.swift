@@ -1,7 +1,8 @@
 import Cocoa
 import WebKit
+import UniformTypeIdentifiers
 
-class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandler {
     var window: NSWindow!
     var webView: WKWebView!
 
@@ -20,6 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         window.minSize = NSSize(width: 640, height: 420)
 
         let config = WKWebViewConfiguration()
+        config.userContentController.add(self, name: "saveFile")
         webView = WKWebView(frame: frame, configuration: config)
         webView.navigationDelegate = self
         webView.autoresizingMask = [.width, .height]
@@ -46,6 +48,44 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             return
         }
         decisionHandler(.allow)
+    }
+
+    // Receive a save request from the web UI and show the native save panel.
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "saveFile",
+              let dict = message.body as? [String: Any] else { return }
+        let content = dict["content"] as? String ?? ""
+        let suggested = dict["name"] as? String ?? "formatted.json"
+
+        let panel = NSSavePanel()
+        panel.title = "Save JSON"
+        panel.nameFieldStringValue = suggested
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        if #available(macOS 11.0, *), let jsonType = UTType(filenameExtension: "json") {
+            panel.allowedContentTypes = [jsonType]
+        }
+
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url else {
+                self?.notifySaveResult(saved: false, name: "")
+                return
+            }
+            do {
+                try content.write(to: url, atomically: true, encoding: .utf8)
+                self?.notifySaveResult(saved: true, name: url.lastPathComponent)
+            } catch {
+                self?.notifySaveResult(saved: false, name: error.localizedDescription)
+            }
+        }
+    }
+
+    private func notifySaveResult(saved: Bool, name: String) {
+        let escaped = name
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        let js = "window.onNativeSaved && window.onNativeSaved(\(saved), '\(escaped)')"
+        webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
